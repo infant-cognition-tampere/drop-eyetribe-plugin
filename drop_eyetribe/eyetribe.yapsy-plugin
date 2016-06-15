@@ -1,0 +1,9 @@
+[Core]
+Name = eyetribe
+Module = eyetribe
+
+[Documentation]
+Description = Plugin for EyeTribe Eyetracker
+Author =
+Version =
+Website =
