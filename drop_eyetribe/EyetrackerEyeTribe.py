@@ -5,12 +5,10 @@ from threading import Thread
 from Queue import Queue
 import socket
 from select import select
-
 import json
-
 import nudged
-
 import glib
+import os
 
 
 class EyeTribeSocket(Thread):
@@ -217,6 +215,8 @@ class EyeTribeET(Sensor):
         self.nudged_transform_r = nudged.Transform(1, 0, 0, 0)
         self.nudged_transform_l = nudged.Transform(1, 0, 0, 0)
 
+        self.collect_data = False
+
         glib.idle_add(self.on_created, self)
 
     def _handle_frame_callback(self, frame):
@@ -251,11 +251,27 @@ class EyeTribeET(Sensor):
         gaze_right_x = frame['righteye']['raw']['x'] / screen_w
         gaze_right_y = frame['righteye']['raw']['y'] / screen_h
 
+        # Put normalized coordinates back into frame
+        frame['lefteye']['raw']['x'] = gaze_left_x
+        frame['lefteye']['raw']['y'] = gaze_left_x
+        frame['righteye']['raw']['x'] = gaze_right_x
+        frame['righteye']['raw']['y'] = gaze_right_y
+
+        # TODO: Do normalization and transforms for avg coordinates as well
+
         # Nudged transform
         gaze_left_nx, gaze_left_ny = \
             self.nudged_transform_l.transform([gaze_left_x, gaze_left_y])
         gaze_right_nx, gaze_right_ny = \
             self.nudged_transform_r.transform([gaze_right_x, gaze_right_y])
+
+        # Write data to file if recording has started
+        frame.update({
+            'lefteye_nudged': {'raw': {'x': gaze_left_x, 'y': gaze_left_y}},
+            'righteye_nudged': {'raw': {'x': gaze_right_x, 'y': gaze_right_y}}
+        })
+        if self.collect_data:
+            self.collect_file.write(json.dumps(frame) + '\n')
 
         # Calibration & linear transformation section
         if self.nudged_current_range is not None:
@@ -301,6 +317,9 @@ class EyeTribeET(Sensor):
     def tag(self, tag):
         """Called when tag needs to be inserted into data."""
         print "TAG %s" % tag
+
+        if self.collect_data:
+            self.collect_file.write(json.dumps({'tag': tag}) + '\n')
 
         # check if validity is to be calculated
         if tag["secondary_id"] == "start":
@@ -365,12 +384,22 @@ class EyeTribeET(Sensor):
 
     def stop_recording(self):
         """Called when recording should be stopped."""
-        print "ET: STOP RECORDING"
+        self.collect_data = False
+        self.collect_file.close()
 
     def start_recording(self, rootdir, participant_id, experiment_file,
                         section_id):
         """Called when recording should be started."""
-        print "ET: START RECORDING"
+        expname = os.path.basename(experiment_file).split('.')[0]
+        fname = '%s_%s_%s.gazedata' % (expname, participant_id, section_id)
+        fname = os.path.join(rootdir, fname)
+
+        self.collect_file = open(fname, 'w')
+
+        metadata = json.dumps({'metadata': self.tracker.values})
+        self.collect_file.write(metadata + '\n')
+
+        self.collect_data = True
 
     def disconnect(self):
         """Called when disconnect has been requested from GUI."""
