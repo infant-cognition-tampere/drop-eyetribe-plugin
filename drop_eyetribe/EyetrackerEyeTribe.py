@@ -6,6 +6,8 @@ from Queue import Queue
 import socket
 from select import select
 
+import json
+
 import glib
 
 
@@ -77,6 +79,114 @@ class EyeTribeSocket(Thread):
     def stop(self):
         """Cause the socket loop to exit."""
         self.should_run = False
+
+
+class EyeTribe(object):
+    """
+    Class for interfacing with EyeTribe tracker.
+
+    Mostly handles
+    serialization with The Eye Tribe server and encapsulates a socket
+    thread.
+    """
+
+    get_value_keywords = [
+        'push',
+        'heartbeatinterval',
+        'version',
+        'trackerstate',
+        'framerate',
+        'iscalibrated',
+        'iscalibrating',
+        'screenindex',
+        'screenresw',
+        'screenresh',
+        'screenpsyw',
+        'screenpsyh'
+    ]
+
+    valid_keywords = get_value_keywords + ['calibresult', 'frame']
+
+    def __init__(self, host, port, cb_frame=None):
+        """Constructor."""
+        self.host = host
+        self.port = port
+
+        self.sockthread = None
+
+        self.cb_frame = cb_frame
+        self.values = {}
+
+    def _init_socket(self):
+        if self.sockthread is not None:
+            return
+
+        self.sockthread = EyeTribeSocket(self.host,
+                                         self.port,
+                                         self._msg_handler)
+        self.sockthread.start()
+
+    def _msg_handler(self, raw_msg):
+        # Decode msg
+        msg = json.loads(raw_msg)
+
+        # assert msg.get('statuscode') == 200
+
+        if msg.get('category') == 'tracker':
+            # Update internal value dict
+            self.values.update(msg.get('values', {}))
+
+            # If frame, do a frame callback
+            if 'frame' in msg.get('values', {}):
+                self.cb_frame(msg.get('values').get('frame'))
+
+    def _gen_request(self, category, request, values):
+        # TODO: Some parameter validity checking here
+        return {'category': category,
+                'request': request,
+                'values': values}
+
+    def _gen_set_values_msg(self, values):
+        v = dict()
+        v.update(values)
+        v.update({'version': 2})
+
+        return self._gen_request('tracker', 'set', v)
+
+    def _gen_get_values_msg(self, values):
+        return self._gen_request('tracker', 'get', values)
+
+    def _gen_set_push_msg(self, state):
+        return self._gen_set_values_msg({'push': state})
+
+    def _start_push(self):
+        """Start push mode."""
+        self.sockthread.send(json.dumps(self._gen_set_push_msg(True)))
+
+    def _stop_push(self):
+        """Stop push mode."""
+        # TODO: EyeTribe server does not stop sending data after stop push
+        #       request.
+        self.sockthread.send(json.dumps(self._gen_set_push_msg(False)))
+
+    def start(self):
+        """Start the Eye Tribe."""
+        self._init_socket()
+
+        # First request all relevant values from eyetribe server
+        self.sockthread.send(json.dumps(self._gen_get_values_msg(
+            self.get_value_keywords)))
+
+        # Then start push mode
+        self._start_push()
+
+    def stop(self):
+        """Stop the Eye Tribe."""
+        self._stop_push()
+        self.sockthread.stop()
+
+        del self.sockthread
+        self.sockthread = None
 
 
 class EyeTribeET(Sensor):
