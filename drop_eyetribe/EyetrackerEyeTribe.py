@@ -212,11 +212,46 @@ class EyeTribeET(Sensor):
     def _handle_frame_callback(self, frame):
         glib.idle_add(self._handle_gazedata_frame, frame)
 
+    def _inside_aoi(self, x, y, aoi):
+        return aoi[0] < x and x < aoi[1] and aoi[2] < y and y < aoi[3]
+
+    def _data_condition_check(self, rx, ry, lx, ly):
+        # TODO: Move this function to superclass
+        """
+        Data condition check.
+
+        Returns True if the condition met, False if not.
+        """
+        for cond in self.data_conditions:
+            if cond["type"] == "aoi":
+                if cond["inorout"] == "in" and \
+                    (self._inside_aoi(rx, ry, cond["aoi"]) or
+                     self._inside_aoi(lx, ly, cond["aoi"])):
+                    self.data_conditions = []
+                    return True
+        return False
+
     def _handle_gazedata_frame(self, frame):
-        # TODO: Parsing
+        # TODO: Create a superclass version of this
+        # Parsing
+        screen_w = self.tracker.values['screenresw']
+        screen_h = self.tracker.values['screenresh']
+        gaze_left_x = frame['lefteye']['raw']['x'] / screen_w
+        gaze_left_y = frame['lefteye']['raw']['y'] / screen_h
+        gaze_right_x = frame['righteye']['raw']['x'] / screen_w
+        gaze_right_y = frame['righteye']['raw']['y'] / screen_h
         # TODO: Nudged
         # TODO: Calibration
-        # TODO: Data conditions?
+        # Data condition check
+        dc_uncalibrated = self._data_condition_check(gaze_right_x,
+                                                     gaze_right_y,
+                                                     gaze_left_x,
+                                                     gaze_left_y)
+
+        if dc_uncalibrated:
+            self.emit("draw_que_updated")
+            self.emit("data_condition_met")
+
         # TODO: Draw eyes
         for eye in ['left', 'right']:
             self.draw_eye(eye, frame[eye + 'eye'], 1.0)
