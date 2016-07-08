@@ -1,4 +1,5 @@
 """This plugin provides TheEyeTribe support for drop."""
+from drop_eyetribe.EyetrackerEyeTribe import EyeTribeET
 from yapsy.IPlugin import IPlugin
 import os.path
 
@@ -8,7 +9,7 @@ class EyeTribePlugin(IPlugin):
 
     def get_sensor(self, rootdir, savedir, on_rec_cre, on_rec_err):
         """Construct sensor."""
-        pass
+        return EyeTribeET(rootdir, savedir, on_rec_cre, on_rec_err)
 
 
 def get_plugin():
