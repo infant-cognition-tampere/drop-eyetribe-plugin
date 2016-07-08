@@ -204,7 +204,23 @@ class EyeTribeET(Sensor):
         self.on_created = on_created
         self.on_error = on_error
 
+        self.tracker = EyeTribe("localhost", 6555, self._handle_frame_callback)
+        self.tracker.start()
+
         glib.idle_add(self.on_created, self)
+
+    def _handle_frame_callback(self, frame):
+        glib.idle_add(self._handle_gazedata_frame, frame)
+
+    def _handle_gazedata_frame(self, frame):
+        # TODO: Parsing
+        # TODO: Nudged
+        # TODO: Calibration
+        # TODO: Data conditions?
+        # TODO: Draw eyes
+        for eye in ['left', 'right']:
+            self.draw_eye(eye, frame[eye + 'eye'], 1.0)
+            self.draw_gaze(eye, frame[eye + 'eye'], 1.0)
 
     def trial_started(self, tn, tc):
         """Called when trial has started."""
@@ -251,9 +267,55 @@ class EyeTribeET(Sensor):
 
     def disconnect(self):
         """Called when disconnect has been requested from GUI."""
+        self.tracker.stop()
+
         self.emit("clear_screen")
         self.remove_all_listeners()
         return False
+
+    def draw_gaze(self, eye, frame_eye, opacity):
+        """Draw one gazepoint."""
+        screen_w = self.tracker.values['screenresw']
+        screen_h = self.tracker.values['screenresh']
+        gazepos_x = frame_eye['raw']['x'] / screen_w
+        gazepos_y = frame_eye['raw']['y'] / screen_h
+        radius = 0.02
+
+        self.emit("add_draw_que", eye,
+                  {"type": "circle", "r": 0, "g": 0, "b": 1,
+                   "o": opacity, "x": gazepos_x, "y": gazepos_y,
+                   "radius": radius})
+
+    def draw_eye(self, eye, frame_eye, opacity):
+        """Draw one eye."""
+        camera_pos_x = 1.0 - frame_eye['pcenter']['x']
+        camera_pos_y = frame_eye['pcenter']['y']
+        screen_w = self.tracker.values['screenresw']
+        screen_h = self.tracker.values['screenresh']
+        gazepos_x = frame_eye['raw']['x'] / screen_w
+        gazepos_y = frame_eye['raw']['y'] / screen_h
+
+        point_x = gazepos_x - .5
+        point_y = gazepos_y - .5
+
+        ball_radius = 0.075
+        iris_radius = 0.03
+        pupil_radius = 0.01
+
+        x = 1 - camera_pos_x
+        y = camera_pos_y
+        self.emit("add_draw_que", eye + "ball",
+                  {"type": "circle", "r": 1, "g": 1, "b": 1,
+                   "o": opacity, "x": x, "y": y, "radius": ball_radius})
+
+        x = 1 - camera_pos_x + ((ball_radius - iris_radius / 2) * point_x)
+        y = camera_pos_y + ((ball_radius - iris_radius / 2) * point_y)
+        self.emit("add_draw_que", eye + "iris",
+                  {"type": "circle", "r": 0.5, "g": 0.5, "b": 1,
+                   "o": opacity, "x": x, "y": y, "radius": iris_radius})
+        self.emit("add_draw_que", eye + "pupil",
+                  {"type": "circle", "r": 0, "g": 0, "b": 0,
+                   "o": opacity, "x": x, "y": y, "radius": pupil_radius})
 
     def __del__(self):
         """Destructor."""
