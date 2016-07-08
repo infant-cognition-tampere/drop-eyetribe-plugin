@@ -8,6 +8,8 @@ from select import select
 
 import json
 
+import nudged
+
 import glib
 
 
@@ -207,6 +209,14 @@ class EyeTribeET(Sensor):
         self.tracker = EyeTribe("localhost", 6555, self._handle_frame_callback)
         self.tracker.start()
 
+        # nudged calibration values
+        self.nudged_current_range = None
+        self.nudged_domain_r = []
+        self.nudged_domain_l = []
+        self.nudged_range = []
+        self.nudged_transform_r = nudged.Transform(1, 0, 0, 0)
+        self.nudged_transform_l = nudged.Transform(1, 0, 0, 0)
+
         glib.idle_add(self.on_created, self)
 
     def _handle_frame_callback(self, frame):
@@ -240,22 +250,45 @@ class EyeTribeET(Sensor):
         gaze_left_y = frame['lefteye']['raw']['y'] / screen_h
         gaze_right_x = frame['righteye']['raw']['x'] / screen_w
         gaze_right_y = frame['righteye']['raw']['y'] / screen_h
-        # TODO: Nudged
-        # TODO: Calibration
+
+        # Nudged transform
+        gaze_left_nx, gaze_left_ny = \
+            self.nudged_transform_l.transform([gaze_left_x, gaze_left_y])
+        gaze_right_nx, gaze_right_ny = \
+            self.nudged_transform_r.transform([gaze_right_x, gaze_right_y])
+
+        # Calibration & linear transformation section
+        if self.nudged_current_range is not None:
+            # If tracking both gaze and eyes (as a validity check)
+            if frame['state'] & 0x3 != 0:
+                self.nudged_range.append(self.nudged_current_range)
+                self.nudged_domain_l.append([gaze_left_x, gaze_left_y])
+                self.nudged_domain_r.append([gaze_right_x, gaze_right_y])
+
         # Data condition check
+        dc_nudged = self._data_condition_check(gaze_right_nx,
+                                               gaze_right_ny,
+                                               gaze_left_nx,
+                                               gaze_left_ny)
         dc_uncalibrated = self._data_condition_check(gaze_right_x,
                                                      gaze_right_y,
                                                      gaze_left_x,
                                                      gaze_left_y)
 
-        if dc_uncalibrated:
+        if dc_nudged or dc_uncalibrated:
             self.emit("draw_que_updated")
             self.emit("data_condition_met")
 
-        # TODO: Draw eyes
+        # Draw eyes and gaze positions
         for eye in ['left', 'right']:
             self.draw_eye(eye, frame[eye + 'eye'], 1.0)
-            self.draw_gaze(eye, frame[eye + 'eye'], 1.0)
+
+        self.draw_gaze('left', gaze_left_x, gaze_left_y, 1.0)
+        self.draw_gaze('right', gaze_right_x, gaze_right_y, 1.0)
+        self.draw_gaze('leftN', gaze_left_nx, gaze_left_ny, 1.0,
+                       {'r': 1, 'g': 1, 'b': 1})
+        self.draw_gaze('rightN', gaze_right_nx, gaze_right_ny, 1.0,
+                       {'r': 1, 'g': 1, 'b': 1})
 
     def trial_started(self, tn, tc):
         """Called when trial has started."""
@@ -268,6 +301,45 @@ class EyeTribeET(Sensor):
     def tag(self, tag):
         """Called when tag needs to be inserted into data."""
         print "TAG %s" % tag
+
+        # check if validity is to be calculated
+        if tag["secondary_id"] == "start":
+
+            # go to nudged calibration mode
+            if "nudged_point" in tag:
+
+                # Nudged point format: "1.0, 0.5"
+                [x, y] = tag["nudged_point"].split(",")
+                xf = float(x)
+                yf = float(y)
+                self.nudged_current_range = [xf, yf]
+
+                # check if previous occurrances of this point exist
+                while [xf, yf] in self.nudged_range:
+                    # find the index of the element in range
+                    ind = self.nudged_range.index([xf, yf])
+
+                    # remove the index from range and domains
+                    self.nudged_range.pop(ind)
+                    self.nudged_domain_l.pop(ind)
+                    self.nudged_domain_r.pop(ind)
+
+        elif tag["secondary_id"] == "end":
+
+            if "nudged_point" in tag:
+                self.nudged_current_range = None
+
+                # calculate nudged transform
+                print "Calculating nudged calibration for right eye with " + \
+                    "vectors: dom[" + str(len(self.nudged_domain_r)) + \
+                    "] and range[" + str(len(self.nudged_range))
+                self.nudged_transform_r = nudged.estimate(self.nudged_domain_r,
+                                                          self.nudged_range)
+
+                print "Calculating new calibration..."
+                self.nudged_transform_l = nudged.estimate(self.nudged_domain_l,
+                                                          self.nudged_range)
+        return False
 
     def action(self, action_id):
         """Perform actions for the control elements defined."""
@@ -308,17 +380,20 @@ class EyeTribeET(Sensor):
         self.remove_all_listeners()
         return False
 
-    def draw_gaze(self, eye, frame_eye, opacity):
+    def draw_gaze(self, eye, gazepos_x, gazepos_y, opacity,
+                  color={'r': 0, 'g': 0, 'b': 1}):
         """Draw one gazepoint."""
-        screen_w = self.tracker.values['screenresw']
-        screen_h = self.tracker.values['screenresh']
-        gazepos_x = frame_eye['raw']['x'] / screen_w
-        gazepos_y = frame_eye['raw']['y'] / screen_h
         radius = 0.02
 
-        self.emit("add_draw_que", eye,
-                  {"type": "circle", "r": 0, "g": 0, "b": 1,
-                   "o": opacity, "x": gazepos_x, "y": gazepos_y,
+        self.emit("add_draw_que",
+                  eye,
+                  {"type": "circle",
+                   "r": color['r'],
+                   "g": color['g'],
+                   "b": color['b'],
+                   "o": opacity,
+                   "x": gazepos_x,
+                   "y": gazepos_y,
                    "radius": radius})
 
     def draw_eye(self, eye, frame_eye, opacity):
