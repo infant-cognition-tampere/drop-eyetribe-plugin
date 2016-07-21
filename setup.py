@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-drop-eyetribe-plugin
+drop-eyetribe-plugin.
 
 This plugin provides support for The Eye Tribe eyetrackers.
 
