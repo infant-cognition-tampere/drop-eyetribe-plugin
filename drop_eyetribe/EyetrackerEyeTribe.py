@@ -124,7 +124,7 @@ def _convert_json_to_tabdelim(source_filename, dest_filename):
 
     # Modify frame dicts to contain tag information where present
     for f in frame_dicts:
-        frame_time = f['TETTime']
+        frame_time = f['TETTime'] / 1000
         for t in tags:
             assert t[0]['secondary_id'] == 'start' and \
                 t[1]['secondary_id'] == 'end'
@@ -133,7 +133,7 @@ def _convert_json_to_tabdelim(source_filename, dest_filename):
             end_time = t[1]['timestamp']
 
             if frame_time > start_time and frame_time < end_time:
-                tagdict = dict(t)
+                tagdict = {k: str(v) for k, v in t[0].iteritems()}
                 tagdict.pop('secondary_id')
 
                 f.update(tagdict)
