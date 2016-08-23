@@ -34,8 +34,8 @@ def _parse_timestamp(ts):
                   microsecond=int(
                       m.group('millisecond')) * 1000)
 
-    return (time.mktime(dt.timetuple()) * 1000) + \
-           (dt.microsecond / 1000) / 1000.0
+    return ((time.mktime(dt.timetuple()) * 1000) +
+            (dt.microsecond / 1000)) * 1000.0
 
 
 def _get_validity_from_state(state):
@@ -124,7 +124,7 @@ def _convert_json_to_tabdelim(source_filename, dest_filename):
 
     # Modify frame dicts to contain tag information where present
     for f in frame_dicts:
-        frame_time = f['TETTime'] / 1000
+        frame_time = f['TETTime'] / (1000 * 1000)
         for t in tags:
             assert t[0]['secondary_id'] == 'start' and \
                 t[1]['secondary_id'] == 'end'
